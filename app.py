@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 import asyncpg
 import websockets
+from aiohttp import web
 
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -22,7 +23,15 @@ db_pool = None
 
 async def init_db():
     global db_pool
-    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL environment variable is not set!")
+    
+    # Maneja la compatibilidad del prefijo de URL de PostgreSQL para asyncpg
+    db_url = DATABASE_URL
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+        
+    db_pool = await asyncpg.create_pool(db_url)
 
 def calculate_currency_strength():
     changes = {}
@@ -83,6 +92,9 @@ async def strength_calculation_loop():
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Metrics sent to Neon: {scores}")
 
 async def websocket_listener():
+    if not FINNHUB_API_KEY:
+        raise ValueError("FINNHUB_API_KEY environment variable is not set!")
+    
     uri = f"wss://ws.finnhub.io?token={FINNHUB_API_KEY}"
     async with websockets.connect(uri) as ws:
         for pair in PAIRS:
@@ -98,8 +110,23 @@ async def websocket_listener():
                     if symbol not in base_prices:
                         base_prices[symbol] = price
 
+# Servidor HTTP liviano para pasar la validación de Render (Health Check)
+async def handle_health_check(request):
+    return web.Response(text="Forex Ingestion Service is running OK!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_handle_check if 'handle_handle_check' in locals() else handle_health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Health check HTTP server listening on port {port}")
+
 async def main():
     await init_db()
+    await start_web_server()
     await asyncio.gather(
         websocket_listener(),
         strength_calculation_loop()
