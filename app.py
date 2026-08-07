@@ -1,10 +1,26 @@
 import os
+import time
 import datetime
 import requests
 import psycopg2
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 FINNHUB_TOKEN = os.getenv("FINNHUB_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Servidor HTTP para satisfacer el chequeo de Render
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_health_server():
+    port = int(os.getenv("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f"Servidor HTTP activo en puerto {port}")
+    server.serve_forever()
 
 ASSETS = [
     # Stocks
@@ -109,14 +125,26 @@ def save_to_neon(market_records, macro_records):
         conn.commit()
         cur.close()
         conn.close()
-        print("Proceso completado con éxito.")
+        print("Proceso de guardado completado.")
     except Exception as e:
         print(f"Error en base de datos: {e}")
 
+def run_collector():
+    while True:
+        print("\n--- Ejecutando recolección de datos ---")
+        if FINNHUB_TOKEN and DATABASE_URL:
+            m_data = fetch_market_data()
+            mac_data = fetch_macro_calendar()
+            save_to_neon(m_data, mac_data)
+        else:
+            print("CRÍTICO: Faltan variables de entorno.")
+        
+        # Espera 5 minutos (300 segundos) para la siguiente recolección
+        time.sleep(300)
+
 if __name__ == "__main__":
-    if not FINNHUB_TOKEN or not DATABASE_URL:
-        print("CRÍTICO: Faltan las variables FINNHUB_TOKEN o DATABASE_URL.")
-    else:
-        m_data = fetch_market_data()
-        mac_data = fetch_macro_calendar()
-        save_to_neon(m_data, mac_data)
+    # Iniciar servidor HTTP para el healthcheck de Render en un hilo secundario
+    Thread(target=start_health_server, daemon=True).start()
+    
+    # Iniciar el bucle de recolección continua
+    run_collector()
