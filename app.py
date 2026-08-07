@@ -108,3 +108,13 @@ if __name__ == "__main__":
     
     # Iniciar servidor HTTP en el hilo principal para Render
     run_web_server()
+
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK - Worker running")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
