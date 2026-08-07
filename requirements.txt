@@ -2,3 +2,5 @@ websockets
 asyncpg
 python-dotenv
 aiohttp
+requests
+psycopg2-binary
